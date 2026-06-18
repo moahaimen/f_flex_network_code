@@ -1,0 +1,14 @@
+{
+  "method": "gnn_lpd_dqn_selective_db_lp",
+  "rows": 3976,
+  "mean_PR": 0.9974309976460087,
+  "min_PR": 0.9548327648017318,
+  "mean_DB": 0.005448223503963336,
+  "mean_decision_ms": 246.61244962631716,
+  "p95_decision_ms": 657.1842392495455,
+  "full_od_fallback_rate": 0.06916498993963782,
+  "k_escalation_rate": 0.06287726358148893,
+  "gnn_usage_rate": 1.0,
+  "lpd_usage_rate": 1.0,
+  "heuristic_used_rate": 0.0
+}

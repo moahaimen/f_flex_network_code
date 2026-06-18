@@ -1,0 +1,29 @@
+{
+  "checkpoint": "results/gnn_lpd_dqn_selective_db_lp/models/gnn_dbbudget_selector.pt",
+  "architecture": {
+    "type": "GNNFlowSelector",
+    "message_passing": "GraphSAGE-style",
+    "node_dim": 16,
+    "edge_dim": 8,
+    "od_dim": 10,
+    "hidden_dim": 64,
+    "num_layers": 3,
+    "dropout": 0.1,
+    "n_params": 72886
+  },
+  "training": {
+    "label_csv": "results/gnn_lpd_dqn_selective_db_lp/labels/oracle_labels.csv",
+    "oracle_solver": "full_od_db_budgeted_lp",
+    "oracle_function": "solve_selected_path_lp_dbbudget",
+    "heuristic_ranking_used_for_labels": false,
+    "db_budgeted_oracle_used": true,
+    "full_mcf_min_mlu_teacher_only": false,
+    "rank_weight": 0.7,
+    "bce_weight": 0.3,
+    "best_val_prec_at_k": 0.747445004726163,
+    "epochs_trained": 25,
+    "n_train_samples": 192,
+    "n_val_samples": 48
+  },
+  "disclaimer": "This GNN was trained exclusively from DB-budgeted LP oracle labels. Labels are derived from what the full-OD DB-budgeted LP chose to reroute. No heuristic criticality ranking was used. This is the professor-compliant clean-method GNN."
+}

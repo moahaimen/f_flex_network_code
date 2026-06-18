@@ -1,0 +1,23 @@
+{
+  "oracle_solver": "full_od_db_budgeted_lp",
+  "oracle_function": "solve_selected_path_lp_dbbudget",
+  "oracle_source": "frozen full-OD DB-budgeted LP result (one-stage path LP, PR-first with DB budget constraint)",
+  "db_budget_used": 0.1,
+  "heuristic_ranking_used_for_labels": false,
+  "full_mcf_min_mlu_teacher_only": false,
+  "db_budgeted_oracle_used": true,
+  "label_definition": "reroute_mass[i] = demand[i] * L1_split_distance(lp_split[i], ecmp_split[i]); label_useful=1 if reroute_mass[i] > quantile_0.5 of active ODs",
+  "oracle_score_definition": "reroute_mass[i] / max_reroute_mass (soft label in [0,1])",
+  "k_paths": 8,
+  "path_mode": "disjoint",
+  "topologies": [
+    "abilene",
+    "cernet",
+    "ebone",
+    "geant",
+    "sprintlink",
+    "tiscali"
+  ],
+  "total_rows": 279360,
+  "notes": "Merged: 5-topology base (213,760 rows) + CERNET (65,600 rows via full-OD DB-budgeted LP oracle, 40 cycles \u00d7 1640 ODs, all Optimal)."
+}

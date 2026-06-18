@@ -1,0 +1,36 @@
+{
+  "method": "gnn_lpd_dqn_selective_db_lp",
+  "gnn_used": 1,
+  "lpd_used": 1,
+  "criticality_backend": "gnn_lpd",
+  "heuristic_used": 0,
+  "dqn_used": 1,
+  "selected_od_lp_used": 1,
+  "stage2_used": 0,
+  "disturbance_finalization_used": 0,
+  "random_forest_gate_used": 0,
+  "sticky_gate_used": 0,
+  "gnn_checkpoint": "results/gnn_lpd_dqn_selective_db_lp/models/gnn_dbbudget_selector.pt",
+  "pooled": {
+    "method": "gnn_lpd_dqn_selective_db_lp",
+    "rows": 3976,
+    "mean_PR": 0.9974309976460087,
+    "min_PR": 0.9548327648017318,
+    "mean_DB": 0.005448223503963336,
+    "mean_decision_ms": 246.61244962631716,
+    "p95_decision_ms": 657.1842392495455,
+    "full_od_fallback_rate": 0.06916498993963782,
+    "k_escalation_rate": 0.06287726358148893,
+    "gnn_usage_rate": 1.0,
+    "lpd_usage_rate": 1.0,
+    "heuristic_used_rate": 0.0
+  },
+  "action_distribution": {
+    "OPTIMIZE_K30_DB_0.01": 3269,
+    "OPTIMIZE_K40_DB_0.03": 405,
+    "OPTIMIZE_K30_DB_0.03": 193,
+    "KEEP_PREVIOUS_ROUTING": 97,
+    "OPTIMIZE_K40_DB_0.01": 12
+  },
+  "disclaimer": "This is the professor-compliant clean method. It does NOT reproduce the legacy accepted report directly. It uses a real PyTorch GNN-LPD selector and DQN controller without RandomForest gate, sticky reuse, or Stage-2 LP."
+}
