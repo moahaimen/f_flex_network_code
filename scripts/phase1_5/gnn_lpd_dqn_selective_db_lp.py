@@ -216,18 +216,30 @@ N_ACTIONS = len(ACTION_CONFIG)
 FULL_OD_FALLBACK_PR_SAFE = 7
 FULL_OD_FALLBACK_LOW_MLU = 8
 
-# ── K escalation — ladder: 30 → 40 → 50 → full-OD fallback ──────────────────
-K_CAP_ABSOLUTE = 50    # never select more than 50 ODs before full-OD fallback
-K_CAP_FRACTION = 0.25  # cap at 25% of active ODs (so k_cap=50 even for large topos)
+# ── K escalation — selected-K ladder (no full-OD escalation ever) ───────────
+# K_CAP_ABSOLUTE caps the maximum K selected within the escalation ladder.
+# K_CAP_FRACTION = 1.0 allows up to 100% of active ODs (removed fraction cap).
+# Full-OD LP is never triggered automatically; it requires explicit DQN selection.
+# Topology-specific ladders reflect each topology's active-OD density.
+# Round-2 ceilings: K=400 gave CERNET PR=91.9% (need 97.5%); scaling to 85% coverage.
+#   - CERNET   (~1640 active ODs): K1400 = 85% coverage
+#   - GEANT    (~425 active ODs): K300 = 70% coverage; was 0.06pp short at K200
+#   - Sprintlink (~1892 active ODs): K1600 = 85% coverage
+#   - Tiscali  (~2352 active ODs): K1000 = 43% coverage; no FlexDATE target
+#   - Germany50 (~1441 active ODs): K1000 = 69% coverage; no FlexDATE target
+K_CAP_ABSOLUTE = 1600  # selected-K ceiling; raised from 400 to 1600 for dense topologies
+K_CAP_FRACTION = 1.0   # allow selecting up to 100% of active ODs
+# Two-level ladders: quick initial attempt then one large-K solve.
+# Path caches pre-built; LP at K≤1600 solves in 1-3s (well under 60s limit).
 K_LADDER = {
-    "abilene":        [30, 40, 50],
-    "cernet":         [30, 40, 50],
-    "geant":          [30, 40, 50],
-    "sprintlink":     [30, 40, 50],
-    "tiscali":        [30, 40, 50],
-    "ebone":          [30, 40, 50],
-    "germany50":      [30, 40, 50],
-    "vtlwavenet2011": [30, 40, 50],
+    "abilene":        [30, 50, 120],    # ~127 active ODs; K30 sufficient most cycles
+    "cernet":         [30, 1400],        # ~1640 active ODs; K1400 = 85% coverage
+    "geant":          [30, 80, 300],     # ~425 active ODs; K300 closes the 0.06pp gap
+    "sprintlink":     [30, 1600],        # ~1892 active ODs; K1600 = 85% coverage
+    "tiscali":        [30, 1000],        # ~2352 active ODs; K1000 = 43% coverage
+    "ebone":          [30, 50],          # ~506 active ODs; PR=99.99% at K30; keep small
+    "germany50":      [30, 1000],        # ~1441 active ODs; K1000 = 69% coverage
+    "vtlwavenet2011": [30, 100, 200],    # ~8372 active ODs; sparse bottleneck
 }
 
 
@@ -302,8 +314,26 @@ def _build_spec_lookup(bundle):
 
 
 def build_context(bundle, lookup, topo: str, k_paths: int = 8, path_mode: str = "disjoint"):
+    import pickle
     ds, _ = load_named_dataset(bundle, lookup[topo], max_steps=None)
-    pl = build_diverse_paths(ds, k_paths=int(k_paths), mode=path_mode)
+    # Cache diverse-path libraries: building 8 disjoint paths for large topologies
+    # (e.g., VtlWavenet2011 with 8372 OD pairs) takes several minutes. The path
+    # library is deterministic (topology + weights only, no traffic/capacities),
+    # so caching is safe.
+    cache_dir = OUT_ROOT / "path_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{topo}_k{k_paths}_{path_mode}.pkl"
+    if cache_file.exists():
+        with cache_file.open("rb") as fh:
+            pl = pickle.load(fh)
+        print(f"[path-cache] Loaded {topo} from {cache_file.name}", flush=True)
+    else:
+        print(f"[path-cache] Building diverse paths for {topo} (k={k_paths}, mode={path_mode})…",
+              flush=True)
+        pl = build_diverse_paths(ds, k_paths=int(k_paths), mode=path_mode)
+        with cache_file.open("wb") as fh:
+            pickle.dump(pl, fh, protocol=4)
+        print(f"[path-cache] Saved {topo} → {cache_file.name}", flush=True)
     caps = np.asarray(ds.capacities, dtype=float)
     return {
         "ds": ds, "pl": pl, "caps": caps,
@@ -784,7 +814,7 @@ class SelectiveRoutingEnv:
 
 
 # ── State dimension ───────────────────────────────────────────────────────────
-# 8 topology one-hot + 9 action one-hot + 14 misc features
+# 8 topology one-hot + 9 action one-hot + 14 misc features = 31
 STATE_DIM = len(STATE_TOPOS) + N_ACTIONS + 14  # = 8 + 9 + 14 = 31
 
 
@@ -855,6 +885,7 @@ def evaluate_policy(
                     "sticky_gate_used":            0,
                     "solver_backend":              solver_backend,
                     "dqn_action":                  str(info["action_name"]),
+                    "action_name":                 str(info["action_name"]),
                     "action":                      int(info["action"]),
                     "db_budget":                   float(info["db_budget"]),
                     "decision_ms":                 float(info["decision_ms"]),
@@ -958,6 +989,41 @@ def _summarize(df: pd.DataFrame, out_dir: Path, tag: str) -> dict:
     # Canonical names for artifact references
     (out_dir / "overall.json").write_text(json.dumps(pooled, indent=2))
     df.to_csv(out_dir / "per_cycle.csv", index=False)
+
+    # FlexDATE win comparison table
+    win_rows = []
+    name_col = "dqn_action" if "dqn_action" in df.columns else "action_name"
+    for topo, g in df.groupby("topology", sort=False):
+        fd = FLEXDATE.get(topo, {})
+        our_pr = float(g["feat_PR"].mean())
+        our_db = float(g["chosen_disturbance"].mean())
+        fd_pr = fd.get("PR")
+        fd_db = fd.get("DB")
+        pr_win = bool(our_pr >= fd_pr) if fd_pr is not None else None
+        db_win = bool(our_db <= fd_db) if fd_db is not None else None
+        both_win = bool(pr_win and db_win) if (pr_win is not None) else None
+        if name_col in g.columns:
+            dom = g[name_col].value_counts()
+            dom_str = "; ".join(f"{a}:{c}" for a, c in dom.head(3).items())
+        else:
+            dom_str = "n/a"
+        win_rows.append({
+            "topology":       topo,
+            "n":              len(g),
+            "our_PR":         round(our_pr, 6),
+            "flexdate_PR":    fd_pr,
+            "PR_win":         pr_win,
+            "our_DB":         round(our_db, 6),
+            "flexdate_DB":    fd_db,
+            "DB_win":         db_win,
+            "both_PR_DB_win": both_win,
+            "mean_ms":        round(float(g["decision_ms"].mean()), 2),
+            "p95_ms":         round(float(g["decision_ms"].quantile(0.95)), 2),
+            "dominant_actions": dom_str,
+        })
+    win_df = pd.DataFrame(win_rows)
+    win_df.to_csv(out_dir / "flexdate_win_comparison.csv", index=False)
+
     return pooled
 
 

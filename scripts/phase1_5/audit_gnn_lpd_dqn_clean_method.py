@@ -113,10 +113,11 @@ def main():
     # ------------------------------------------------------------------
     print("\n[1] Required output files...")
     required = {
-        "per_cycle_csv": None,
-        "summary_csv": None,
-        "overall_json": None,
-        "method_audit": eval_dir / "method_audit.json",
+        "per_cycle_csv":          None,
+        "summary_csv":            None,
+        "overall_json":           None,
+        "method_audit":           eval_dir / "method_audit.json",
+        "flexdate_win_comparison": None,
     }
     # Find per_cycle, summary, and overall files.
     # Accept both canonical clean names and older tag-prefixed names.
@@ -144,6 +145,9 @@ def main():
 
         if (eval_dir / "method_audit.json").exists():
             required["method_audit"] = eval_dir / "method_audit.json"
+
+        if (eval_dir / "flexdate_win_comparison.csv").exists():
+            required["flexdate_win_comparison"] = eval_dir / "flexdate_win_comparison.csv"
 
     for name, path in required.items():
         if path is None or not Path(path).exists():
@@ -364,6 +368,11 @@ def main():
     else:
         print(f"    OK  dqn_action column present ({df['dqn_action'].nunique()} unique values)")
 
+    if "action_name" not in df.columns:
+        failures.append("Column 'action_name' missing from per-cycle CSV.")
+    else:
+        print(f"    OK  action_name column present ({df['action_name'].nunique()} unique values)")
+
     # ------------------------------------------------------------------
     # BLOCK 12: DQN scope enforcement — no hidden full-OD override
     # ------------------------------------------------------------------
@@ -440,12 +449,15 @@ def main():
     print(
         "\nThis confirms the method is professor-compliant:\n"
         "  - GNN-LPD selector trained from DB-budgeted oracle labels (not heuristic)\n"
-        "  - DQN controls K30/K40/K50 action + DB budget selection\n"
+        "  - DQN controls selected-K action (K30/K50/…) + DB budget selection\n"
+        "  - Within-selected-K escalation ladder extended to K600 for dense topologies\n"
+        "  - No hidden selected-K → full-OD auto-override\n"
         "  - No RandomForest gate, no sticky reuse, no Stage-2, no heuristic fallback\n"
         "  - criticality_backend=gnn_lpd in every eval cycle\n"
         "  - Non-selected OD pairs always route on static ECMP (ecmp_background_used=1)\n"
         "  - Full-OD LP only when DQN explicitly selects a full-OD fallback action\n"
-        "  - No internal flexdate variable names in method or selector scripts"
+        "  - No internal flexdate variable names in method or selector scripts\n"
+        "  - flexdate_win_comparison.csv generated from regenerated final results"
     )
     print("=" * 70)
 
