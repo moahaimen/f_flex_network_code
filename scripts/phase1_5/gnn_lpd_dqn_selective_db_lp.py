@@ -490,10 +490,12 @@ class SelectiveRoutingEnv:
         return self._state(np.asarray(self.ctx["ds"].tm[self.t], dtype=float))
 
     def _base_splits(self):
-        return self.ctx["ecmp"] if self.prev_tm is None else self.prev_splits
+        # Non-selected OD pairs always route on static ECMP.
+        # prev_splits is used only as DB-budget reference inside the LP constraint.
+        return self.ctx["ecmp"]
 
     def _background_mode(self) -> str:
-        return "ecmp" if self.prev_tm is None else "previous"
+        return "ecmp"
 
     def _gnn_scores(self, tm: np.ndarray):
         """Score OD pairs using the mandatory GNN-LPD. Hard-fails if GNN errors."""
@@ -674,29 +676,26 @@ class SelectiveRoutingEnv:
                 if idx > 0:
                     k_escalation_used = 1
                     k_escalation_steps = idx
+                selected_od_lp_used = 1  # LP ran for selected ODs
                 if s_status not in {"Optimal", "Not Solved", "Undefined"}:
                     fallback_reason = "solver_failed"
                     continue
                 if s_pr >= target:
                     accepted = True
-                    selected_od_lp_used = 1
                     break
             if not accepted:
-                full_od_fallback_used = 1
-                if fallback_reason != "solver_failed":
-                    fallback_reason = "pr_failed_after_k_cap"
-                for fb_budget in (0.05, 1.0):
-                    f_splits, f_routing, f_mlu, f_pr, f_status = self._run_lp(
-                        tm, active, base_splits, fb_budget, 1e-6)
-                    splits, routing, mlu, pr, lp_status = (
-                        f_splits, f_routing, f_mlu, f_pr, f_status)
-                    selected_ods = active
-                    full_od_lp_used = 1
-                    selected_od_lp_used = 0
-                    final_selected_k = active_count
-                    eff_db_budget = float(fb_budget)
-                    if f_pr >= target:
-                        break
+                # DQN selected a selected-K action; full-OD override is forbidden.
+                # Use the best K-cap LP result as-is and record the PR shortfall.
+                selected_od_lp_used = 1
+                if fallback_reason not in ("solver_failed",):
+                    fallback_reason = "selected_k_pr_failed_no_full_override"
+                # If all LP attempts returned None splits (solver completely failed), fall back to ECMP.
+                if splits is None:
+                    splits = clone_splits(base_splits)
+                    routing = apply_routing(tm, splits, ctx["pl"], ctx["caps"])
+                    mlu = float(routing.mlu)
+                    pr = float(min(1.0, ref / mlu)) if (mlu > 0 and ref == ref) else 0.0
+                # full_od_fallback_used, full_od_lp_used stay 0 — DQN did not choose full-OD.
 
         decision_ms = (time.perf_counter() - t0) * 1000.0
         db = float(compute_disturbance(self.prev_splits, splits, tm))

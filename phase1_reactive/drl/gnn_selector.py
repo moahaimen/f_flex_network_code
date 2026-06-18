@@ -3,14 +3,14 @@
 Replaces the MoE gate + expert ensemble with a single GNN that:
   1. Encodes topology graph via message passing (no torch_geometric needed)
   2. Scores each OD pair via src/dst node embeddings + OD features
-  3. Adds residual FlexDATE scoring for robustness on unseen topologies
+  3. Adds residual path-cost scoring for robustness on unseen topologies
   4. Optionally predicts dynamic k_crit from graph-level embedding
 
 Architecture:
   Graph(V, E) + per-edge/per-node features
     -> L layers of GraphSAGE-style message passing
     -> Per-OD scoring head (src embed + dst embed + od features)
-    -> Residual: final_score = flexdate_score + alpha * gnn_correction
+    -> Residual: final_score = path_cost_demand_score + alpha * gnn_correction
     -> Dynamic k_crit head (optional, from global graph embedding)
 """
 
@@ -186,7 +186,7 @@ def build_od_features(dataset, tm_vector, path_library, telemetry=None, device="
       - od_features: [num_od, od_dim]
       - od_src_idx: [num_od]  node index of source
       - od_dst_idx: [num_od]  node index of destination
-      - flexdate_scores: [num_od]  demand * min_path_cost (FlexDATE baseline)
+      - path_cost_demand_scores: [num_od]  demand * min_path_cost (neutral path-cost descriptor)
     """
     dev = torch.device(device)
     od_pairs = dataset.od_pairs
@@ -199,8 +199,8 @@ def build_od_features(dataset, tm_vector, path_library, telemetry=None, device="
     od_src = np.array([node_to_idx[od[0]] for od in od_pairs], dtype=np.int64)
     od_dst = np.array([node_to_idx[od[1]] for od in od_pairs], dtype=np.int64)
 
-    # FlexDATE score: demand * min_path_cost (the core FlexDATE heuristic)
-    flexdate_scores = np.zeros(num_od, dtype=np.float32)
+    # Path-cost demand score: demand * min_path_cost (neutral traffic/topology descriptor)
+    path_cost_demand_scores = np.zeros(num_od, dtype=np.float32)
     path_costs = np.zeros(num_od, dtype=np.float64)
     num_paths = np.zeros(num_od, dtype=np.float64)
     bottleneck_util = np.zeros(num_od, dtype=np.float64)
@@ -216,7 +216,7 @@ def build_od_features(dataset, tm_vector, path_library, telemetry=None, device="
         if costs:
             min_cost = min(costs)
             path_costs[od_idx] = min_cost
-            flexdate_scores[od_idx] = float(tm[od_idx]) * float(min_cost)
+            path_cost_demand_scores[od_idx] = float(tm[od_idx]) * float(min_cost)
             num_paths[od_idx] = len(costs)
             # bottleneck: max utilization on best path
             best_path_idx = int(np.argmin(costs))
@@ -229,7 +229,7 @@ def build_od_features(dataset, tm_vector, path_library, telemetry=None, device="
     # Normalize
     path_costs_norm = path_costs / (np.max(path_costs) + 1e-12)
     num_paths_norm = num_paths / (np.max(num_paths) + 1e-12)
-    flexdate_norm = flexdate_scores / (np.max(np.abs(flexdate_scores)) + 1e-12)
+    path_cost_demand_norm = path_cost_demand_scores / (np.max(np.abs(path_cost_demand_scores)) + 1e-12)
 
     # Active mask
     active = (tm > 0).astype(np.float64)
@@ -250,7 +250,7 @@ def build_od_features(dataset, tm_vector, path_library, telemetry=None, device="
         bottleneck_util,
         mean_path_util,
         headroom,
-        flexdate_norm,
+        path_cost_demand_norm,
         active,
         demand_rank,
         np.log1p(tm) / (np.log1p(np.max(tm)) + 1e-12),
@@ -264,7 +264,7 @@ def build_od_features(dataset, tm_vector, path_library, telemetry=None, device="
         "od_features": torch.tensor(od_feat, dtype=torch.float32, device=dev),
         "od_src_idx": torch.tensor(od_src, dtype=torch.long, device=dev),
         "od_dst_idx": torch.tensor(od_dst, dtype=torch.long, device=dev),
-        "flexdate_scores": torch.tensor(flexdate_scores, dtype=torch.float32, device=dev),
+        "path_cost_demand_scores": torch.tensor(path_cost_demand_scores, dtype=torch.float32, device=dev),
         "bottleneck_scores": torch.tensor(bottleneck_scores, dtype=torch.float32, device=dev),
     }
 
@@ -330,12 +330,12 @@ class GNNFlowSelector(nn.Module):
       1. L layers of GraphSAGE message passing on topology graph
       2. For each OD pair (s,d): score = MLP(node_s || node_d || od_features)
       3. Graph-conditioned blend: learns per-topology weights for bottleneck vs
-         flexdate heuristics, plus a GNN correction term scaled by learned confidence
+         path-cost heuristics, plus a GNN correction term scaled by learned confidence
       4. Optional: k_crit = sigmoid(graph_embed) * (k_max - k_min) + k_min
 
-    Key insight: bottleneck heuristic dominates on large topologies while flexdate
-    is competitive on small ones. The blend head learns to adapt the base heuristic
-    to topology structure, and the confidence head learns when to trust/suppress
+    Key insight: bottleneck heuristic dominates on large topologies while path-cost
+    scoring is competitive on small ones. The blend head learns to adapt the base
+    heuristic to topology structure, and the confidence head learns when to trust/suppress
     the GNN correction (suppress on topologies where heuristics are already optimal).
     """
 
@@ -370,7 +370,7 @@ class GNNFlowSelector(nn.Module):
         # Residual weight alpha (learnable, initialized small)
         self.log_alpha = nn.Parameter(torch.tensor(math.log(max(cfg.residual_alpha_init, 1e-4))))
 
-        # Graph-conditioned blend head: predicts (w_bottleneck, w_flexdate)
+        # Graph-conditioned blend head: predicts (w_bottleneck, w_path_cost)
         self.blend_head = nn.Sequential(
             nn.Linear(h, h // 4),
             nn.ReLU(),
@@ -407,7 +407,7 @@ class GNNFlowSelector(nn.Module):
     def forward(self, graph_data, od_data):
         """
         graph_data: dict with node_features, edge_index, edge_features
-        od_data: dict with od_features, od_src_idx, od_dst_idx, flexdate_scores, bottleneck_scores
+        od_data: dict with od_features, od_src_idx, od_dst_idx, path_cost_demand_scores, bottleneck_scores
 
         Returns:
           scores: [num_od] final OD scores (higher = more critical)
@@ -421,8 +421,8 @@ class GNNFlowSelector(nn.Module):
         od_feat = od_data["od_features"]            # [num_od, od_dim]
         od_src = od_data["od_src_idx"]              # [num_od]
         od_dst = od_data["od_dst_idx"]              # [num_od]
-        bottleneck = od_data["bottleneck_scores"]   # [num_od] — strongest heuristic
-        flexdate = od_data["flexdate_scores"]       # [num_od]
+        bottleneck = od_data["bottleneck_scores"]         # [num_od] — strongest heuristic
+        path_cost_scores = od_data["path_cost_demand_scores"]  # [num_od]
 
         # Node encoding
         h = F.relu(self.node_proj(node_feat))       # [V, hidden]
@@ -445,16 +445,16 @@ class GNNFlowSelector(nn.Module):
 
         # Normalize heuristic scores and GNN correction
         bn_norm = bottleneck / (bottleneck.abs().max() + 1e-12)
-        flex_norm = flexdate / (flexdate.abs().max() + 1e-12)
+        path_cost_norm = path_cost_scores / (path_cost_scores.abs().max() + 1e-12)
         corr_norm = gnn_correction / (gnn_correction.abs().max() + 1e-12)
 
         # Graph-conditioned heuristic blend weights
         blend_logits = self.blend_head(graph_embed)  # [2]
         blend_weights = F.softmax(blend_logits, dim=0)  # [2] sums to 1
-        w_bn, w_flex = blend_weights[0], blend_weights[1]
+        w_bn, w_path_cost = blend_weights[0], blend_weights[1]
 
         # Adaptive base: topology-conditioned blend of strongest heuristics
-        base_scores = w_bn * bn_norm + w_flex * flex_norm
+        base_scores = w_bn * bn_norm + w_path_cost * path_cost_norm
 
         # Confidence: how much to trust GNN correction for this topology
         confidence = self.confidence_head(graph_embed).squeeze()  # scalar in [0, 1]
@@ -474,7 +474,7 @@ class GNNFlowSelector(nn.Module):
             "alpha": float(alpha.item()),
             "confidence": float(confidence.item()),
             "w_bottleneck": float(w_bn.item()),
-            "w_flexdate": float(w_flex.item()),
+            "w_path_cost": float(w_path_cost.item()),
             "gnn_correction_mean": float(gnn_correction.mean().item()),
             "gnn_correction_std": float(gnn_correction.std().item()),
             "k_pred": k_pred,

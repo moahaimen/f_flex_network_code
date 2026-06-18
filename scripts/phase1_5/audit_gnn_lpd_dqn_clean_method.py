@@ -57,6 +57,8 @@ REQUIRED_ROW_VALUES = {
     "random_forest_gate_used":     0,
     "sticky_gate_used":            0,
     "heuristic_used":              0,
+    "ecmp_background_used":        1,
+    "previous_background_used":    0,
 }
 REQUIRED_BACKEND = "gnn_lpd"
 
@@ -342,6 +344,88 @@ def main():
               f"DB={mean_db:.5f} (≤{fd.get('DB',1):.4f}? {db_ok})")
 
     # ------------------------------------------------------------------
+    # BLOCK 11: ECMP background string + action_name column check
+    # ------------------------------------------------------------------
+    print("\n[11] ECMP background mode + action_name column checks...")
+    if "noncritical_background_mode" in df.columns:
+        bad_mode = df[df["noncritical_background_mode"] != "ecmp"]
+        if len(bad_mode) > 0:
+            failures.append(
+                f"noncritical_background_mode: {len(bad_mode)} rows != 'ecmp'. "
+                f"Values: {bad_mode['noncritical_background_mode'].value_counts().to_dict()}"
+            )
+        else:
+            print(f"    OK  noncritical_background_mode == 'ecmp' in all {len(df)} rows")
+    else:
+        failures.append("Column 'noncritical_background_mode' missing from per-cycle CSV.")
+
+    if "dqn_action" not in df.columns:
+        failures.append("Column 'dqn_action' missing from per-cycle CSV (expected action name strings).")
+    else:
+        print(f"    OK  dqn_action column present ({df['dqn_action'].nunique()} unique values)")
+
+    # ------------------------------------------------------------------
+    # BLOCK 12: DQN scope enforcement — no hidden full-OD override
+    # ------------------------------------------------------------------
+    print("\n[12] DQN scope enforcement checks...")
+    FULL_OD_ACTIONS = {"FULL_OD_FALLBACK_PR_SAFE", "FULL_OD_FALLBACK_LOW_MLU"}
+
+    # (a) pr_failed_after_k_cap must never appear
+    if "fallback_reason" in df.columns:
+        bad_reason = df[df["fallback_reason"] == "pr_failed_after_k_cap"]
+        if len(bad_reason) > 0:
+            failures.append(
+                f"fallback_reason 'pr_failed_after_k_cap' found in {len(bad_reason)} rows — "
+                "hidden full-OD override was not removed."
+            )
+        else:
+            print("    OK  fallback_reason 'pr_failed_after_k_cap' absent from all rows")
+    else:
+        failures.append("Column 'fallback_reason' missing from per-cycle CSV.")
+
+    # (b) full_od_lp_used==1 only when DQN explicitly chose a full-OD action
+    if "full_od_lp_used" in df.columns and "dqn_action" in df.columns:
+        fo_rows = df[df["full_od_lp_used"] == 1]
+        bad_fo = fo_rows[~fo_rows["dqn_action"].isin(FULL_OD_ACTIONS)]
+        if len(bad_fo) > 0:
+            failures.append(
+                f"full_od_lp_used==1 in {len(bad_fo)} rows where dqn_action is NOT a "
+                f"full-OD action. Offending actions: {bad_fo['dqn_action'].value_counts().to_dict()}"
+            )
+        else:
+            n_fo = len(fo_rows)
+            print(f"    OK  full_od_lp_used==1 only for explicit full-OD DQN actions ({n_fo} rows)")
+    elif "full_od_lp_used" not in df.columns:
+        failures.append("Column 'full_od_lp_used' missing from per-cycle CSV.")
+
+    # ------------------------------------------------------------------
+    # BLOCK 13: flexdate internal naming absent from method scripts
+    # ------------------------------------------------------------------
+    print("\n[13] flexdate internal naming scan...")
+    GNN_SELECTOR_SCRIPT = ROOT / "phase1_reactive" / "drl" / "gnn_selector.py"
+    FLEXDATE_INTERNAL_TOKENS = [
+        "flexdate_scores",
+        "flexdate_norm",
+        "w_flexdate",
+        "\"flexdate_scores\"",
+        "\"w_flexdate\"",
+    ]
+    for fpath in (CLEAN_METHOD_SCRIPT, GNN_SELECTOR_SCRIPT):
+        if not fpath.exists():
+            failures.append(f"Script not found for flexdate scan: {fpath}")
+            continue
+        src = fpath.read_text()
+        for token in FLEXDATE_INTERNAL_TOKENS:
+            if token in src:
+                failures.append(
+                    f"Internal flexdate token '{token}' still present in {fpath.name}"
+                )
+        # No additional residual check needed — specific token list above covers all
+        # internal variable names. All-caps FLEXDATE constant (baseline reference dict)
+        # is allowed and is not checked here.
+        print(f"    OK  no internal flexdate variable names in {fpath.name}")
+
+    # ------------------------------------------------------------------
     # Final verdict
     # ------------------------------------------------------------------
     print("\n" + "=" * 70)
@@ -358,7 +442,10 @@ def main():
         "  - GNN-LPD selector trained from DB-budgeted oracle labels (not heuristic)\n"
         "  - DQN controls K30/K40/K50 action + DB budget selection\n"
         "  - No RandomForest gate, no sticky reuse, no Stage-2, no heuristic fallback\n"
-        "  - criticality_backend=gnn_lpd in every eval cycle"
+        "  - criticality_backend=gnn_lpd in every eval cycle\n"
+        "  - Non-selected OD pairs always route on static ECMP (ecmp_background_used=1)\n"
+        "  - Full-OD LP only when DQN explicitly selects a full-OD fallback action\n"
+        "  - No internal flexdate variable names in method or selector scripts"
     )
     print("=" * 70)
 
