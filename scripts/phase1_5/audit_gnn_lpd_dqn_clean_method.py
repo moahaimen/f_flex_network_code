@@ -116,14 +116,32 @@ def main():
         "overall_json": None,
         "method_audit": eval_dir / "method_audit.json",
     }
-    # Find per_cycle and summary CSVs (accept any tag prefix)
-    if eval_dir.is_dir():
-        for f in sorted(eval_dir.glob("*_per_cycle.csv")):
-            required["per_cycle_csv"] = f
-        for f in sorted(eval_dir.glob("*_summary.csv")):
-            required["summary_csv"] = f
-        for f in sorted(eval_dir.glob("*_overall.json")):
-            required["overall_json"] = f
+    # Find per_cycle, summary, and overall files.
+    # Accept both canonical clean names and older tag-prefixed names.
+    if eval_dir.exists():
+        if (eval_dir / "per_cycle.csv").exists():
+            required["per_cycle_csv"] = eval_dir / "per_cycle.csv"
+        else:
+            matches = sorted(eval_dir.glob("*_per_cycle.csv"))
+            if matches:
+                required["per_cycle_csv"] = matches[0]
+
+        if (eval_dir / "per_topology_summary.csv").exists():
+            required["summary_csv"] = eval_dir / "per_topology_summary.csv"
+        else:
+            matches = sorted(eval_dir.glob("*_per_topology_summary.csv"))
+            if matches:
+                required["summary_csv"] = matches[0]
+
+        if (eval_dir / "overall.json").exists():
+            required["overall_json"] = eval_dir / "overall.json"
+        else:
+            matches = sorted(eval_dir.glob("*_overall.json"))
+            if matches:
+                required["overall_json"] = matches[0]
+
+        if (eval_dir / "method_audit.json").exists():
+            required["method_audit"] = eval_dir / "method_audit.json"
 
     for name, path in required.items():
         if path is None or not Path(path).exists():
