@@ -397,23 +397,24 @@ def run_clean_cycle(
                 accepted = True
                 selected_od_lp_used = 1
                 break
+        if accepted:
+            # Clear stale solver_failed label — escalated LP succeeded.
+            fallback_reason = "none"
         if not accepted:
-            full_od_fallback_used = 1
-            if fallback_reason != "solver_failed":
-                fallback_reason = "pr_failed_after_k_cap"
-            for fb_budget in (0.05, 1.0):
-                f_splits, f_routing, f_mlu, f_pr, f_status = _run_lp_clean(
-                    tm, active, base_splits, caps, prev_splits if prev_splits is not None else base_splits,
-                    pathopt_mlu, ctx, fb_budget, 1e-6)
-                splits, routing, mlu, pr, lp_status = (
-                    f_splits, f_routing, f_mlu, f_pr, f_status)
-                selected_ods = active
-                full_od_lp_used = 1
-                selected_od_lp_used = 0
-                final_selected_k = active_count
-                eff_db_budget = float(fb_budget)
-                if f_pr >= target:
-                    break
+            # DQN selected a selected-K action; full-OD override is forbidden.
+            # Use the best K-cap LP result as-is and record the PR shortfall.
+            selected_od_lp_used = 1
+            if lp_status == "Optimal":
+                # Last LP was Optimal but PR guard not met — not a solver failure.
+                fallback_reason = "selected_k_pr_failed_no_full_override"
+            # else: fallback_reason stays "solver_failed" (all LP attempts failed)
+            if splits is None:
+                splits = clone_splits(base_splits)
+                routing = apply_routing(tm, splits, ctx["pl"], caps)
+                mlu = float(routing.mlu)
+                pr = float(min(1.0, pathopt_mlu / mlu)) if (
+                    mlu > 0 and np.isfinite(pathopt_mlu)) else 0.0
+            # full_od_fallback_used, full_od_lp_used stay 0 — DQN did not choose full-OD.
 
     decision_ms = (time.perf_counter() - t0) * 1000.0
 

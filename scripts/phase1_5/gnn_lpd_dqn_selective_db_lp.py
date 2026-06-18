@@ -713,12 +713,17 @@ class SelectiveRoutingEnv:
                 if s_pr >= target:
                     accepted = True
                     break
+            if accepted:
+                # Clear stale solver_failed label — the escalated LP succeeded.
+                fallback_reason = "none"
             if not accepted:
                 # DQN selected a selected-K action; full-OD override is forbidden.
                 # Use the best K-cap LP result as-is and record the PR shortfall.
                 selected_od_lp_used = 1
-                if fallback_reason not in ("solver_failed",):
+                if lp_status == "Optimal":
+                    # Last LP was Optimal but PR guard not met — not a solver failure.
                     fallback_reason = "selected_k_pr_failed_no_full_override"
+                # else: fallback_reason stays "solver_failed" (all LP attempts failed)
                 # If all LP attempts returned None splits (solver completely failed), fall back to ECMP.
                 if splits is None:
                     splits = clone_splits(base_splits)

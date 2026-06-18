@@ -14,23 +14,23 @@
   "pooled": {
     "method": "gnn_lpd_dqn_selective_db_lp",
     "rows": 3976,
-    "mean_PR": 0.9864597452462599,
+    "mean_PR": 0.986724143389937,
     "min_PR": 0.2733826758517281,
-    "mean_DB": 0.007095014625578138,
-    "mean_decision_ms": 171.41839123765817,
-    "p95_decision_ms": 632.6114475014037,
+    "mean_DB": 0.007026542149454713,
+    "mean_decision_ms": 216.4170556891729,
+    "p95_decision_ms": 1119.525332997,
     "full_od_fallback_rate": 0.0,
-    "k_escalation_rate": 0.5513078470824949,
+    "k_escalation_rate": 0.5563380281690141,
     "gnn_usage_rate": 1.0,
     "lpd_usage_rate": 1.0,
     "heuristic_used_rate": 0.0
   },
   "action_distribution": {
-    "OPTIMIZE_K30_DB_0.01": 1956,
-    "OPTIMIZE_K40_DB_0.03": 831,
-    "OPTIMIZE_K30_DB_0.03": 706,
+    "OPTIMIZE_K30_DB_0.01": 1925,
+    "OPTIMIZE_K40_DB_0.03": 863,
+    "OPTIMIZE_K30_DB_0.03": 713,
     "OPTIMIZE_K40_DB_0.01": 387,
-    "KEEP_PREVIOUS_ROUTING": 96
+    "KEEP_PREVIOUS_ROUTING": 88
   },
   "disclaimer": "This is the professor-compliant clean method. It does NOT reproduce the legacy accepted report directly. It uses a real PyTorch GNN-LPD selector and DQN controller without RandomForest gate, sticky reuse, or Stage-2 LP."
 }
