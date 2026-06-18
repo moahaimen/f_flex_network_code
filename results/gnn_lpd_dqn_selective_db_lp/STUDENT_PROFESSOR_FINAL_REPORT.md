@@ -320,8 +320,8 @@ N=3,976 protocol.
 
 > **Direct runtime conclusion:**
 > Full-OD fallback was never triggered (FO=0.0% on all topologies). All cycles used selected-K
-> LP only. Mean decision time is below 500 ms on six of eight topologies. Sprintlink (mean 597 ms,
-> P95 673 ms) and Tiscali (mean 1366 ms, P95 2265 ms) are elevated because K1600 and K1000 LPs
+> LP only. Mean decision time is below 500 ms on six of eight topologies. Sprintlink (mean 1,055.7 ms,
+> P95 1,831.6 ms) and Tiscali (mean 1,594.0 ms, P95 2,730.6 ms) are elevated because K1600 and K1000 LPs
 > are required for every cycle on these dense topologies. All LP solves complete well within the
 > 60-second time limit; the ceiling is never hit.
 
@@ -635,9 +635,11 @@ Tiscali is included in N = 3,288 and the CDFs but is **not** claimed as a FlexDA
 On the full N = 3,976 internal protocol, the method achieves
 **98.672% mean PR**, **0.703% mean DB**, **216.4 ms mean decision time**, and **1,119.5 ms P95 decision time**.
 Full-OD fallback rate is 0.0% — the DQN never selected full-OD actions in this evaluation.
-All LP solves completed within the 60-second per-LP time limit. Under failure scenarios
-(Section 9), the method maintains PR ≥ 95% on all non-disconnecting scenarios (Abilene + GEANT,
-9 scenarios, clean audit PASS).
+All LP solves completed within the 60-second per-LP time limit. Under failure scenarios,
+the clean method exposes a limitation: with strict DQN-scope enforcement and no hidden
+full-OD fallback, link-failure cases can become BudgetInfeasible and fall back to ECMP,
+producing near-zero PR in several failure scenarios. Therefore, failure validation is
+reported as a limitation rather than as a robustness win.
 SDN / Mininet operational validation (Section 10, Table 13) preserves the original live Mininet
 operational metrics from the accepted report artifact, reported as operational validation only
 and separate from the clean offline N=3,976 evaluation and the FlexDATE comparison.
